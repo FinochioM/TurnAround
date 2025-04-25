@@ -77,7 +77,6 @@ update :: proc() {
 
 	input = linalg.normalize0(input)
 	g_mem.player_pos += input * rl.GetFrameTime() * 100
-	g_mem.some_number += 1
 
 	if rl.IsKeyPressed(.ESCAPE) {
 		g_mem.run = false
@@ -90,16 +89,12 @@ draw :: proc() {
 
 	rl.BeginMode2D(game_camera())
 	rl.DrawTextureEx(g_mem.player_texture, g_mem.player_pos, 0, 1, rl.WHITE)
-	rl.DrawRectangleV({20, 20}, {10, 10}, rl.RED)
-	rl.DrawRectangleV({-30, -20}, {10, 10}, rl.GREEN)
 	rl.EndMode2D()
 
 	rl.BeginMode2D(ui_camera())
 
-	// NOTE: `fmt.ctprintf` uses the temp allocator. The temp allocator is
-	// cleared at the end of the frame by the main application, meaning inside
-	// `main_hot_reload.odin`, `main_release.odin` or `main_web_entry.odin`.
-	rl.DrawText(fmt.ctprintf("some_number: %v\nplayer_pos: %v", g_mem.some_number, g_mem.player_pos), 5, 5, 8, rl.WHITE)
+	fps := rl.GetFPS()
+	rl.DrawText(fmt.ctprintf("FPS: %v\nplayer_pos: %v", fps, g_mem.player_pos), 5, 5, 8, rl.WHITE)
 
 	rl.EndMode2D()
 
@@ -115,7 +110,7 @@ game_update :: proc() {
 @(export)
 game_init_window :: proc() {
 	rl.SetConfigFlags({.WINDOW_RESIZABLE, .VSYNC_HINT})
-	rl.InitWindow(1280, 720, "Odin + Raylib + Hot Reload template!")
+	rl.InitWindow(1280, 720, "Turn Around")
 	rl.SetWindowPosition(200, 200)
 	rl.SetTargetFPS(500)
 	rl.SetExitKey(nil)
@@ -131,7 +126,7 @@ game_init :: proc() {
 
 		// You can put textures, sounds and music in the `assets` folder. Those
 		// files will be part any release or web build.
-		player_texture = rl.LoadTexture("assets/round_cat.png"),
+		player_texture = rl.LoadTexture("assets/player.png"),
 	}
 
 	game_hot_reloaded(g_mem)
