@@ -1,0 +1,10 @@
+build/**
+project.sublime-workspace
+game_hot_reload.exe
+game_hot_reload.bin
+raylib.dll
+linux/**
+/.github/workflows/build.yml
+/.vscode/launch.json
+/.vscode/settings.json
+/.vscode/tasks.json
