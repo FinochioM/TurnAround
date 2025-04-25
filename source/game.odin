@@ -77,7 +77,11 @@ is_adjacent :: proc(pos1, pos2: [2]int) -> bool {
 	dx := abs(pos1[0] - pos2[0])
 	dy := abs(pos1[1] - pos2[1])
 
-	return (dx == 1 && dy == 0) || (dx == 0 && dx == 1)
+	return (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
+}
+
+is_within_range :: proc(pos1, pos2: [2]int, range: int) -> bool {
+	return manhattan_distance(pos1, pos2) <= range
 }
 
 abs :: proc(x: int) -> int {
@@ -205,7 +209,7 @@ handle_wilderness_input :: proc() {
         }
 
         if g_mem.current_action == .Move {
-            if is_adjacent(g_mem.player_grid_pos, grid_mouse_pos) {
+            if is_within_range(g_mem.player_grid_pos, grid_mouse_pos, 3) {
                 enemy_at_pos := false
                 for enemy in g_mem.enemies {
                     if enemy.position[0] == grid_mouse_pos[0] && enemy.position[1] == grid_mouse_pos[1] {
@@ -286,15 +290,14 @@ update :: proc() {
 }
 
 draw_grid :: proc() {
-	camera := game_camera()
+    camera := game_camera()
+    screen_width := f32(rl.GetScreenWidth())
+    screen_height := f32(rl.GetScreenHeight())
 
-	screen_width := f32(rl.GetScreenWidth())
-	screen_height := f32(rl.GetScreenHeight())
+    half_width := screen_width / (2 * camera.zoom)
+    half_height := screen_height / (2 * camera.zoom)
 
-	half_width := screen_width / (2 * camera.zoom)
-	half_height := screen_height / (2 * camera.zoom)
-
-	min_x := int(math.floor((camera.target.x - half_width) / GRID_SIZE)) - 1
+    min_x := int(math.floor((camera.target.x - half_width) / GRID_SIZE)) - 1
     min_y := int(math.floor((camera.target.y - half_height) / GRID_SIZE)) - 1
     max_x := int(math.ceil((camera.target.x + half_width) / GRID_SIZE)) + 1
     max_y := int(math.ceil((camera.target.y + half_height) / GRID_SIZE)) + 1
@@ -312,10 +315,10 @@ draw_grid :: proc() {
     }
 
     if g_mem.current_action == .Move {
-        for y := g_mem.player_grid_pos[1] - 1; y <= g_mem.player_grid_pos[1] + 1; y += 1 {
-            for x := g_mem.player_grid_pos[0] - 1; x <= g_mem.player_grid_pos[0] + 1; x += 1 {
+        for y := g_mem.player_grid_pos[1] - 3; y <= g_mem.player_grid_pos[1] + 3; y += 1 {
+            for x := g_mem.player_grid_pos[0] - 3; x <= g_mem.player_grid_pos[0] + 3; x += 1 {
                 if (x == g_mem.player_grid_pos[0] && y == g_mem.player_grid_pos[1]) ||
-                   (x != g_mem.player_grid_pos[0] && y != g_mem.player_grid_pos[1]) {
+                   !is_within_range(g_mem.player_grid_pos, {x, y}, 3) {
                     continue
                 }
 
