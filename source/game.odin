@@ -130,22 +130,54 @@ manhattan_distance :: proc(pos1, pos2: [2]int) -> int {
 }
 
 game_camera :: proc() -> rl.Camera2D {
-	w := f32(rl.GetScreenWidth())
-	h := f32(rl.GetScreenHeight())
+    w := f32(rl.GetScreenWidth())
+    h := f32(rl.GetScreenHeight())
 
-	target := g_mem.mode == .Lobby ? g_mem.player_pos : grid_to_world(g_mem.player_grid_pos)
+    target := g_mem.mode == .Lobby ? g_mem.player_pos : grid_to_world(g_mem.player_grid_pos)
 
-	return {
-		zoom = h / PIXEL_WINDOW_HEIGHT,
-		target = target,
-		offset = { w/2, h/2 },
-	}
+    if g_mem.mode == .Lobby {
+        target = constrain_camera_to_map(target, g_mem.lobby_tilemap, w, h)
+    }
+
+    return {
+        zoom = h / PIXEL_WINDOW_HEIGHT,
+        target = target,
+        offset = { w/2, h/2 },
+    }
 }
 
 ui_camera :: proc() -> rl.Camera2D {
 	return {
 		zoom = f32(rl.GetScreenHeight())/PIXEL_WINDOW_HEIGHT,
 	}
+}
+
+constrain_camera_to_map :: proc(camera_pos: rl.Vector2, tilemap: Tilemap, screen_width, screen_height: f32) -> rl.Vector2 {
+    constrained := camera_pos
+
+    map_width := f32(tilemap.width * tilemap.tileset.tile_width)
+    map_height := f32(tilemap.height * tilemap.tileset.tile_height)
+
+    half_visible_width := screen_width / 2
+    half_visible_height := screen_height / 2
+
+    if constrained.x - half_visible_width < 0 {
+        constrained.x = half_visible_width
+    }
+
+    if constrained.x + half_visible_width > map_width {
+        constrained.x = map_width - half_visible_width
+    }
+
+    if constrained.y - half_visible_height < 0 {
+        constrained.y = half_visible_height
+    }
+
+    if constrained.y + half_visible_height > map_height {
+        constrained.y = map_height - half_visible_height
+    }
+
+    return constrained
 }
 
 init_ui_elements :: proc() {
@@ -217,7 +249,15 @@ update_lobby :: proc () {
 	}
 
 	input = linalg.normalize0(input)
-	g_mem.player_pos += input * rl.GetFrameTime() * 100
+    new_pos := g_mem.player_pos + input * rl.GetFrameTime() * 100
+
+    map_width := f32(g_mem.lobby_tilemap.width * g_mem.lobby_tilemap.tileset.tile_width)
+    map_height := f32(g_mem.lobby_tilemap.height * g_mem.lobby_tilemap.tileset.tile_height)
+
+    new_pos.x = math.clamp(new_pos.x, 0, map_width - f32(g_mem.player_textures[g_mem.player_class].width))
+    new_pos.y = math.clamp(new_pos.y, 0, map_height - f32(g_mem.player_textures[g_mem.player_class].height))
+
+    g_mem.player_pos = new_pos
 }
 
 handle_wilderness_input :: proc() {
@@ -454,21 +494,19 @@ draw :: proc() {
     rl.BeginMode2D(game_camera())
 
     if g_mem.mode == .Lobby {
-        camera := game_camera()
-        screen_width := f32(rl.GetScreenWidth())
-        screen_height := f32(rl.GetScreenHeight())
-        scale := screen_height / PIXEL_WINDOW_HEIGHT
+        tilemap_pos := rl.Vector2{0, 0}
 
-        tilemap_width := f32(g_mem.lobby_tilemap.width * g_mem.lobby_tilemap.tileset.tile_width)
-        tilemap_height := f32(g_mem.lobby_tilemap.height * g_mem.lobby_tilemap.tileset.tile_height)
+        for i in 0..<len(g_mem.lobby_tilemap.layers) {
+            if i == 1 {
+                rl.DrawTextureEx(get_player_texture(), g_mem.player_pos, 0, 1, rl.WHITE)
+            }
 
-        tilemap_pos := rl.Vector2 {
-            g_mem.player_pos.x - (tilemap_width / 2),
-            g_mem.player_pos.y - (tilemap_height / 2),
+            draw_tilemap_layer(g_mem.lobby_tilemap, i, tilemap_pos)
         }
-        draw_tilemap(g_mem.lobby_tilemap, tilemap_pos)
 
-        rl.DrawTextureEx(get_player_texture(), g_mem.player_pos, 0, 1, rl.WHITE)
+        if len(g_mem.lobby_tilemap.layers) <= 1 {
+            rl.DrawTextureEx(get_player_texture(), g_mem.player_pos, 0, 1, rl.WHITE)
+        }
     } else {
         draw_grid()
 
@@ -685,10 +723,15 @@ Tileset :: struct {
 	rows		: int,
 }
 
+Layer :: struct {
+	name		: string,
+	data		: []int,
+}
+
 Tilemap :: struct {
 	width		: int,
 	height		: int,
-	data		: []int,
+	layers		: []Layer,
 	tileset		: Tileset,
 }
 
@@ -698,110 +741,153 @@ TilemapJSON :: struct {
 	tileset		: string,
 	tile_width	: int,
 	tile_height	: int,
+	layers		: []TilemapLayerJSON,
+}
+
+TilemapLayerJSON :: struct {
+	name		: string,
 	data		: []int,
 }
 
 load_tileset :: proc(image_path: string, tile_width, tile_height: int) -> Tileset {
-	texture := rl.LoadTexture(transmute(cstring) raw_data(image_path))
-	columns := int(texture.width) / tile_width
-	rows := int(texture.height) / tile_height
+    texture := rl.LoadTexture(transmute(cstring) raw_data(image_path))
+    columns := int(texture.width) / tile_width
+    rows := int(texture.height) / tile_height
 
-	return Tileset {
-		texture = texture,
-		tile_width = tile_width,
-		tile_height = tile_height,
-		columns = columns,
-		rows = rows,
-	}
+    return Tileset {
+        texture = texture,
+        tile_width = tile_width,
+        tile_height = tile_height,
+        columns = columns,
+        rows = rows,
+    }
 }
 
 load_tilemap :: proc(json_path: string) -> (tilemap: Tilemap, success: bool) {
-	data, ok := read_entire_file(json_path)
-	if !ok {
-		fmt.println("Failed to read tilemap file: ", json_path)
-		return {}, false
-	}
+    data, ok := read_entire_file(json_path)
+    if !ok {
+        fmt.println("Failed to read tilemap file:", json_path)
+        return {}, false
+    }
+    defer delete(data)
 
-	defer delete(data)
+    tilemap_json: TilemapJSON
+    err := json.unmarshal(data, &tilemap_json)
+    if err != nil {
+        fmt.println("Failed to parse tilemap JSON:", err)
+        return {}, false
+    }
 
-	tilemap_json: TilemapJSON
+    tileset := load_tileset(tilemap_json.tileset, tilemap_json.tile_width, tilemap_json.tile_height)
 
-	err := json.unmarshal(data, &tilemap_json)
-	if err != nil {
-		fmt.println("Failed to parse tilemap JSON: ", err)
-		return {}, false
-	}
+    layers := make([]Layer, len(tilemap_json.layers))
+    for i := 0; i < len(tilemap_json.layers); i += 1 {
+        layer_json := tilemap_json.layers[i]
+        layers[i] = Layer {
+            name = layer_json.name,
+            data = make([]int, len(layer_json.data)),
+        }
+        copy(layers[i].data, layer_json.data)
+    }
 
-	tileset := load_tileset(tilemap_json.tileset, tilemap_json.tile_width, tilemap_json.tile_height)
+    tilemap = Tilemap {
+        width = tilemap_json.width,
+        height = tilemap_json.height,
+        layers = layers,
+        tileset = tileset,
+    }
 
-	tilemap = Tilemap {
-		width = tilemap_json.width,
-		height = tilemap_json.height,
-		data = make([]int, len(tilemap_json.data)),
-		tileset = tileset,
-	}
-
-	copy(tilemap.data, tilemap_json.data)
-
-	return tilemap, true
+    return tilemap, true
 }
 
 create_test_tilemap :: proc(tileset_path: string, tile_width, tile_height: int) -> Tilemap {
-	tileset := load_tileset(tileset_path, tile_width, tile_height)
+    tileset := load_tileset(tileset_path, tile_width, tile_height)
 
-	width := 20
-	height := 15
-	data := make([]int, width * height)
+    width := 20
+    height := 15
 
-	for y in 0..<height {
-		for x in 0..<width {
-			if x == 0 || y == 0 || x == width - 1 || y == height - 1 {
-				data[y * width + x] = 1
-			} else if (x + y) % 2 == 0 {
-				data[y * width + x] = 2
-			} else {
-				data[y * width + x] = 0
-			}
-		}
-	}
+    layers := make([]Layer, 2)
 
-	return Tilemap {
-		width = width,
-		height = height,
-		data = data,
-		tileset = tileset,
-	}
+    layers[0] = Layer {
+        name = "background",
+        data = make([]int, width * height),
+    }
+
+    for y in 0..<height {
+        for x in 0..<width {
+            if x == 0 || y == 0 || x == width-1 || y == height-1 {
+                layers[0].data[y * width + x] = 1  // Border
+            } else if (x + y) % 2 == 0 {
+                layers[0].data[y * width + x] = 2  // Checker pattern
+            } else {
+                layers[0].data[y * width + x] = 3  // Background
+            }
+        }
+    }
+
+    layers[1] = Layer {
+        name = "objects",
+        data = make([]int, width * height),
+    }
+
+    layers[1].data[5 * width + 5] = 4
+    layers[1].data[8 * width + 8] = 5
+    layers[1].data[12 * width + 7] = 6
+
+    return Tilemap {
+        width = width,
+        height = height,
+        layers = layers,
+        tileset = tileset,
+    }
+}
+
+draw_tilemap_layer :: proc(tilemap: Tilemap, layer_index: int, position: rl.Vector2) {
+    if layer_index >= len(tilemap.layers) {
+        return
+    }
+
+    layer := tilemap.layers[layer_index]
+
+    for y in 0..<tilemap.height {
+        for x in 0..<tilemap.width {
+            tile_id := layer.data[y * tilemap.width + x]
+            if tile_id > 0 {
+                tile_x := (tile_id - 1) % tilemap.tileset.columns
+                tile_y := (tile_id - 1) / tilemap.tileset.columns
+
+                source := rl.Rectangle {
+                    x = f32(tile_x * tilemap.tileset.tile_width),
+                    y = f32(tile_y * tilemap.tileset.tile_height),
+                    width = f32(tilemap.tileset.tile_width),
+                    height = f32(tilemap.tileset.tile_height),
+                }
+
+                dest := rl.Rectangle {
+                    x = position.x + f32(x * tilemap.tileset.tile_width),
+                    y = position.y + f32(y * tilemap.tileset.tile_height),
+                    width = f32(tilemap.tileset.tile_width),
+                    height = f32(tilemap.tileset.tile_height),
+                }
+
+                rl.DrawTexturePro(tilemap.tileset.texture, source, dest, {0, 0}, 0, rl.WHITE)
+            }
+        }
+    }
 }
 
 draw_tilemap :: proc(tilemap: Tilemap, position: rl.Vector2) {
-	for y in 0..<tilemap.height {
-		for x in 0..<tilemap.width {
-			tile_id := tilemap.data[y * tilemap.width + x]
-			if tile_id > 0 {
-				tile_x := (tile_id - 1) % tilemap.tileset.columns
-				tile_y := (tile_id - 1) / tilemap.tileset.columns
-
-				source := rl.Rectangle {
-					x = f32(tile_x * tilemap.tileset.tile_width),
-					y = f32(tile_y * tilemap.tileset.tile_height),
-					width = f32(tilemap.tileset.tile_width),
-					height = f32(tilemap.tileset.tile_height),
-				}
-
-				dest := rl.Rectangle {
-					x = position.x + f32(x * tilemap.tileset.tile_width),
-					y = position.y + f32(y * tilemap.tileset.tile_height),
-					width = f32(tilemap.tileset.tile_width),
-					height = f32(tilemap.tileset.tile_height),
-				}
-
-				rl.DrawTexturePro(tilemap.tileset.texture, source, dest, {0, 0}, 0, rl.WHITE)
-			}
-		}
-	}
+    for i in 0..<len(tilemap.layers) {
+        draw_tilemap_layer(tilemap, i, position)
+    }
 }
 
 unload_tilemap :: proc(tilemap: ^Tilemap) {
-	rl.UnloadTexture(tilemap.tileset.texture)
-	delete(tilemap.data)
+    rl.UnloadTexture(tilemap.tileset.texture)
+
+    for i := 0; i < len(tilemap.layers); i += 1 {
+        delete(tilemap.layers[i].data)
+    }
+
+    delete(tilemap.layers)
 }
